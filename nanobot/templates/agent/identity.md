@@ -28,14 +28,24 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
 
 ## Tool Call Parameters — MANDATORY FORMAT
 
-**CRITICAL**: All tool parameters MUST be passed as JSON objects with named keys.
+**CRITICAL**: All tool parameters MUST be passed as JSON objects with named keys. NEVER use lists or positional arguments.
 
-✅ **CORRECT**: `write_file(path="/tmp/test.txt", content="hello")`
-❌ **WRONG**: `write_file(["/tmp/test.txt", "hello"])` — lists are NOT valid
+Different tools require different parameters, but ALL tools follow this rule:
+```python
+# ✅ CORRECT — named parameters (each tool has its own parameters)
+write_file(path="/tmp/test.txt", content="hello")
+edit_file(path="/tmp/test.txt", old_text="foo", new_text="bar", replace_all=true)
+read_file(path="/tmp/test.txt", offset=1, limit=2000)
+
+# ❌ WRONG — NEVER do this for ANY tool
+write_file(["/tmp/test.txt", "hello"])
+edit_file(["/tmp/test.txt", "foo", "bar"])
+read_file("/tmp/test.txt")
+```
 
 | Type | Correct | Wrong |
 |------|---------|-------|
-| string | `path="/home/user/file"` | `path="/home/user/file"` |
+| string | `path="/home/user/file"` | `path="/home/user/file"` (positional) |
 | integer | `offset=1`, `limit=2000` | `offset="1"` or `offset=[1]` |
 | boolean | `recursive=true` | `recursive="true"` or `recursive=[true]` |
-| boolean | `replace_all=false` | `replace_all="false"` |
+| array | `media=["a.txt", "b.txt"]` | `media="a.txt, b.txt"` | |
