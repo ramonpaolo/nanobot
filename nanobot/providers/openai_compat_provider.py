@@ -476,11 +476,23 @@ class OpenAICompatProvider(LLMProvider):
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
                     args = json_repair.loads(args)
+                # Validate arguments type — must be dict, not list
+                tool_name = str(fn.get("name") or "")
+                if not isinstance(args, dict):
+                    logger.warning(
+                        "Tool '{}' received invalid arguments type {}: {}. "
+                        "Tool parameters must be JSON objects with named keys.",
+                        tool_name,
+                        type(args).__name__,
+                        str(args)[:100] if args else None,
+                    )
+                    # Fall back to empty dict — registry will report the error with a clear message
+                    args = {}
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
-                    name=str(fn.get("name") or ""),
-                    arguments=args if isinstance(args, dict) else {},
+                    name=tool_name,
+                    arguments=args,
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
@@ -517,10 +529,21 @@ class OpenAICompatProvider(LLMProvider):
             args = tc.function.arguments
             if isinstance(args, str):
                 args = json_repair.loads(args)
+            # Validate arguments type — must be dict, not list
+            tool_name = tc.function.name
+            if not isinstance(args, dict):
+                logger.warning(
+                    "Tool '{}' received invalid arguments type {}: {}. "
+                    "Tool parameters must be JSON objects with named keys.",
+                    tool_name,
+                    type(args).__name__,
+                    str(args)[:100] if args else None,
+                )
+                args = {}
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
-                name=tc.function.name,
+                name=tool_name,
                 arguments=args,
                 extra_content=ec,
                 provider_specific_fields=prov,
@@ -616,19 +639,39 @@ class OpenAICompatProvider(LLMProvider):
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
+        # Build tool calls with validation
+        validated_tcs = []
+        for b in tc_bufs.values():
+            args_str = b["arguments"]
+            tool_name = b["name"]
+            if args_str:
+                try:
+                    args = json_repair.loads(args_str)
+                except Exception:
+                    args = {}
+            else:
+                args = {}
+            # Ensure arguments is a dict
+            if not isinstance(args, dict):
+                logger.warning(
+                    "Tool '{}' received invalid arguments type {} in streaming response. "
+                    "Tool parameters must be JSON objects with named keys.",
+                    tool_name,
+                    type(args).__name__,
+                )
+                args = {}
+            validated_tcs.append(ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=tool_name,
+                arguments=args,
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            ))
+
         return LLMResponse(
             content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=b["name"],
-                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-            ],
+            tool_calls=validated_tcs,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,

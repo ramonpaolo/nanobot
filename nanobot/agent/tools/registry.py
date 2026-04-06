@@ -68,6 +68,13 @@ class ToolRegistry:
         params: dict[str, Any],
     ) -> tuple[Tool | None, dict[str, Any], str | None]:
         """Resolve, cast, and validate one tool call."""
+        # Guard against invalid parameter types (e.g., list instead of dict)
+        if not isinstance(params, dict):
+            return None, params, (
+                f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
+                "Use named parameters like: tool_name(param1=\"value1\", param2=\"value2\")"
+            )
+
         tool = self._tools.get(name)
         if not tool:
             return None, params, (

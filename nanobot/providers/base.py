@@ -25,6 +25,14 @@ class ToolCallRequest:
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
 
+    def __post_init__(self):
+        """Validate that arguments is a dict, not a list or other invalid type."""
+        if not isinstance(self.arguments, dict):
+            raise TypeError(
+                f"ToolCallRequest arguments must be a dict, got {type(self.arguments).__name__}. "
+                f"Tool '{self.name}' received invalid arguments format."
+            )
+
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""
         tool_call = {
