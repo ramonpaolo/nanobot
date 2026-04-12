@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -420,10 +421,14 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "tool_use":
+                input_args = block.input if isinstance(block.input, dict) else {}
+                if not isinstance(input_args, dict):
+                    logger.warning("Tool '{}' received non-dict arguments: {}", block.name, type(block.input).__name__)
+                    input_args = {}
                 tool_calls.append(ToolCallRequest(
                     id=block.id,
                     name=block.name,
-                    arguments=block.input if isinstance(block.input, dict) else {},
+                    arguments=input_args,
                 ))
             elif block.type == "thinking":
                 thinking_blocks.append({

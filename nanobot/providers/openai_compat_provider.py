@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
+from loguru import logger
 
 if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
     from langfuse.openai import AsyncOpenAI
@@ -582,11 +583,15 @@ class OpenAICompatProvider(LLMProvider):
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
                     args = json_repair.loads(args)
+                tool_name = str(fn.get("name") or "")
+                if not isinstance(args, dict):
+                    logger.warning("Tool '{}' received non-dict arguments: {}", tool_name, type(args).__name__)
+                    args = {}
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
-                    name=str(fn.get("name") or ""),
-                    arguments=args if isinstance(args, dict) else {},
+                    name=tool_name,
+                    arguments=args,
                     extra_content=ec,
                     provider_specific_fields=prov,
                     function_provider_specific_fields=fn_prov,
@@ -625,10 +630,14 @@ class OpenAICompatProvider(LLMProvider):
             args = tc.function.arguments
             if isinstance(args, str):
                 args = json_repair.loads(args)
+            tool_name = tc.function.name
+            if not isinstance(args, dict):
+                logger.warning("Tool '{}' received non-dict arguments: {}", tool_name, type(args).__name__)
+                args = {}
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
-                name=tc.function.name,
+                name=tool_name,
                 arguments=args,
                 extra_content=ec,
                 provider_specific_fields=prov,
@@ -732,19 +741,32 @@ class OpenAICompatProvider(LLMProvider):
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
+        validated_tcs = []
+        for b in tc_bufs.values():
+            args_str = b["arguments"]
+            tool_name = b["name"]
+            if args_str:
+                try:
+                    args = json_repair.loads(args_str)
+                except Exception:
+                    args = {}
+            else:
+                args = {}
+            if not isinstance(args, dict):
+                logger.warning("Tool '{}' received non-dict arguments in streaming: {}", tool_name, type(args).__name__)
+                args = {}
+            validated_tcs.append(ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=tool_name,
+                arguments=args,
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            ))
+
         return LLMResponse(
             content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=b["name"],
-                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-            ],
+            tool_calls=validated_tcs,
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
