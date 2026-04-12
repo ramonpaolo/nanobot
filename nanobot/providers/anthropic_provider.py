@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -380,9 +381,15 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        if thinking_enabled:
+        if reasoning_effort == "adaptive":
+            # Adaptive thinking: model decides when and how much to think
+            # Supported on claude-sonnet-4-6 and claude-opus-4-6.
+            # Also auto-enables interleaved thinking between tool calls.
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["temperature"] = 1.0
+        elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
-            budget = budget_map.get(reasoning_effort.lower(), 4096)  # type: ignore[union-attr]
+            budget = budget_map.get(reasoning_effort.lower(), 4096)
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             kwargs["max_tokens"] = max(max_tokens, budget + 4096)
             kwargs["temperature"] = 1.0
@@ -414,10 +421,14 @@ class AnthropicProvider(LLMProvider):
             if block.type == "text":
                 content_parts.append(block.text)
             elif block.type == "tool_use":
+                input_args = block.input if isinstance(block.input, dict) else {}
+                if not isinstance(input_args, dict):
+                    logger.warning("Tool '{}' received non-dict arguments: {}", block.name, type(block.input).__name__)
+                    input_args = {}
                 tool_calls.append(ToolCallRequest(
                     id=block.id,
                     name=block.name,
-                    arguments=block.input if isinstance(block.input, dict) else {},
+                    arguments=input_args,
                 ))
             elif block.type == "thinking":
                 thinking_blocks.append({
